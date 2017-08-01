@@ -1,8 +1,195 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
-  "parameters": {},
-  "variables": {},
-  "resources": [],
+  "parameters": {
+    "vmdeploystorageType": {
+      "type": "string",
+      "defaultValue": "Standard_LRS",
+      "allowedValues": [
+        "Standard_LRS",
+        "Standard_ZRS",
+        "Standard_GRS",
+        "Standard_RAGRS",
+        "Premium_LRS"
+      ]
+    },
+    "vmdeployName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "vmdeployAdminUserName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "vmdeployAdminPassword": {
+      "type": "securestring"
+    },
+    "vmdeployWindowsOSVersion": {
+      "type": "string",
+      "defaultValue": "2012-R2-Datacenter",
+      "allowedValues": [
+        "2008-R2-SP1",
+        "2012-Datacenter",
+        "2012-R2-Datacenter",
+        "Windows-Server-Technical-Preview"
+      ]
+    },
+    "pipDnsName": {
+      "type": "string",
+      "minLength": 1
+    }},
+  "variables": {
+    "vmdeploystorageName": "[concat('vmdeploystorage', uniqueString(resourceGroup().id))]",
+    "vmdeployvnetPrefix": "10.0.0.0/16",
+    "vmdeployvnetSubnet1Name": "Subnet-1",
+    "vmdeployvnetSubnet1Prefix": "10.0.0.0/24",
+    "vmdeployvnetSubnet2Name": "Subnet-2",
+    "vmdeployvnetSubnet2Prefix": "10.0.1.0/24",
+    "vmdeployImagePublisher": "MicrosoftWindowsServer",
+    "vmdeployImageOffer": "WindowsServer",
+    "vmdeployOSDiskName": "vmdeployOSDisk",
+    "vmdeployVmSize": "Standard_D2_v2",
+    "vmdeployVnetID": "[resourceId('Microsoft.Network/virtualNetworks', 'vmdeployvnet')]",
+    "vmdeploySubnetRef": "[concat(variables('vmdeployVnetID'), '/subnets/', variables('vmdeployvnetSubnet1Name'))]",
+    "vmdeployStorageAccountContainerName": "vhds",
+    "vmdeployNicName": "[concat(parameters('vmdeployName'), 'NetworkInterface')]",
+    "pipName": "pip"},
+  "resources": [
+    {
+      "name": "[variables('vmdeploystorageName')]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-01-01",
+      "sku": {
+        "name": "[parameters('vmdeploystorageType')]"
+      },
+      "dependsOn": [ ],
+      "tags": {
+        "displayName": "vmdeploystorage"
+      },
+      "kind": "Storage"
+    },
+    {
+      "name": "vmdeployvnet",
+      "type": "Microsoft.Network/virtualNetworks",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-03-30",
+      "dependsOn": [ ],
+      "tags": {
+        "displayName": "vmdeployvnet"
+      },
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('vmdeployvnetPrefix')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('vmdeployvnetSubnet1Name')]",
+            "properties": {
+              "addressPrefix": "[variables('vmdeployvnetSubnet1Prefix')]"
+            }
+          },
+          {
+            "name": "[variables('vmdeployvnetSubnet2Name')]",
+            "properties": {
+              "addressPrefix": "[variables('vmdeployvnetSubnet2Prefix')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[variables('vmdeployNicName')]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-03-30",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', 'vmdeployvnet')]",
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
+      ],
+      "tags": {
+        "displayName": "vmdeployNic"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('vmdeploySubnetRef')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[parameters('vmdeployName')]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('vmdeploystorageName'))]",
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('vmdeployNicName'))]"
+      ],
+      "tags": {
+        "displayName": "vmdeploy"
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('vmdeployVmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[parameters('vmdeployName')]",
+          "adminUsername": "[parameters('vmdeployAdminUsername')]",
+          "adminPassword": "[parameters('vmdeployAdminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[variables('vmdeployImagePublisher')]",
+            "offer": "[variables('vmdeployImageOffer')]",
+            "sku": "[parameters('vmdeployWindowsOSVersion')]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "vmdeployOSDisk",
+            "vhd": {
+              "uri": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('vmdeploystorageName')), '2016-01-01').primaryEndpoints.blob, variables('vmdeployStorageAccountContainerName'), '/', variables('vmdeployOSDiskName'), '.vhd')]"
+            },
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('vmdeployNicName'))]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "[variables('pipName')]",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-03-30",
+      "dependsOn": [ ],
+      "tags": {
+        "displayName": "pip"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic",
+        "dnsSettings": {
+          "domainNameLabel": "[parameters('pipDnsName')]"
+        }
+      }
+    }],
   "outputs": {}
 }
